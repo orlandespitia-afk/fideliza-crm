@@ -1,0 +1,20 @@
+{
+    "name": "orlando/laravel-voter-loyalty",
+    "description": "FidelizaCRM Engine: Motor de gestión territorial y redes de liderazgo para Ramiro y Mónica.",
+    "type": "library",
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "App\\": "app/",
+            "Database\\Factories\\": "database/factories/",
+            "Database\\Seeders\\": "database/seeders/",
+            "Orlando\\VoterLoyalty\\": "packages/orlando/laravel-voter-loyalty/src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "Orlando"
+        }
+    ],
+    "require": {}
+}
