@@ -4,170 +4,184 @@ namespace Orlando\VoterLoyalty\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use Orlando\VoterLoyalty\Models\VoterRecord;
-use Illuminate\Support\Facades\Auth; // <-- Este es el escudo que lee la herramienta correctamente
+use Illuminate\Support\Facades\Auth;
+use App\Models\User;
 
 class VoterController extends Controller
 {
     /**
-     * Muestra la pantalla principal con el listado de votantes en español.
-     */
-    public function index(\Illuminate\Http\Request $request)
-    {
-        // 1. Capturamos cuántas filas quiere ver el usuario (por defecto 10)
-        $porPagina = $request->input('per_page', 10);
-
-        // Validamos que solo acepte números permitidos por seguridad
-        if (!in_array($porPagina, [10, 30, 50])) {
-            $porPagina = 10;
-        }
-
-        // 2. Traemos los registros PAGINADOS directamente desde tu modelo de paquete
-        $voters = \Orlando\VoterLoyalty\Models\VoterRecord::latest()->paginate($porPagina);
-
-        // 3. 🟢 MAPEO AL ESPAÑOL INTELIGENTE:
-        // Como es un objeto paginado, usamos ->getCollection() para poder recorrerlos 
-        // y renombrar las variables igual que lo tenías antes, sin romper la paginación.
-        foreach ($voters->getCollection() as $voter) {
-            $voter->email = $voter->voter_email;
-            $voter->fecha_nacimiento = $voter->birth_date;
-            $voter->notas            = $voter->notes;
-        }
-
-        // 4. Mantenemos el parámetro 'per_page' en la URL al cambiar de página
-        $voters->appends(['per_page' => $porPagina]);
-
-        // 5. Cargamos tu plantilla del paquete enviándole los datos y la cantidad elegida
-        return view('voter-loyalty::index', compact('voters', 'porPagina'));
-    }
-
-    /**
-     * Guarda un nuevo votante aplicando las reglas obligatorias y opcionales.
-     */
-
-    public function store(\Illuminate\Http\Request $request)
-    {
-        // 1. Validamos los campos que vienen de la pantalla
-        $request->validate([
-            'cedula'           => 'required|unique:voter_records,cedula',
-            'full_name'        => 'required|string|max:255',
-            'phone'            => 'required|string',
-            'voter_email'      => 'nullable|email',
-            'address'          => 'nullable|string',
-            'fecha_nacimiento' => 'required|date',
-            'leader_id'        => 'nullable|integer',
-            'notas'            => 'nullable|string',
-        ]);
-
-        // 2. Creamos el objeto para la base de datos
-        $voter = new \Orlando\VoterLoyalty\Models\VoterRecord();
-        $voter->cedula       = $request->input('cedula');
-        $voter->full_name    = $request->input('full_name');
-        $voter->phone        = $request->input('phone');
-        $voter->address      = $request->input('address');
-        $voter->voter_email  = $request->input('voter_email');
-
-        // 🟢 MAPEAMOS AL INGLÉS: Guardamos en las columnas reales de tu MySQL
-        $voter->birth_date   = $request->input('fecha_nacimiento');
-        $voter->leader_id    = $request->input('leader_id');
-        $voter->notes        = $request->input('notas');
-
-        // 3. Guardamos físicamente en XAMPP
-        $voter->save();
-
-        // 4. Redireccionamos con mensaje de éxito
-        return redirect()->to('/voters')->with('success', '¡Votante registrado con éxito!');
-    }
-
-    /**
-     * Muestra la pantalla visual del Login (Formulario en blanco).
+     * 1. Muestra el formulario de inicio de sesión de la campaña.
+     * Si el usuario ya está autenticado en el sistema, lo redirige automáticamente al panel.
      */
     public function showLoginForm()
     {
+        if (Auth::check()) {
+            return redirect()->to('/voters');
+        }
+
         return view('voter-loyalty::login');
     }
 
     /**
-     * Procesa el formulario de ingreso y valida las credenciales en XAMPP.
+     * 2. Procesa el intento de autenticación / inicio de sesión.
      */
     public function login(\Illuminate\Http\Request $request)
     {
-        // Validamos texto normal para el usuario
         $credentials = $request->validate([
             'username' => 'required|string',
-            'password' => 'required',
+            'password' => 'required|string',
         ]);
 
-        // Intentamos iniciar sesión con el campo username en XAMPP
         if (Auth::attempt($credentials)) {
             $request->session()->regenerate();
-
-            return redirect()->route('voters.index');
+            return redirect()->to('/voters');
         }
 
-        // Si falla, el error ahora rastrea el campo username
         return back()->withErrors([
-            'username' => 'El nombre de usuario o la contraseña no coinciden.',
-        ]);
+            'username' => 'Las credenciales proporcionadas no coinciden con nuestros registros.',
+        ])->withInput($request->only('username'));
     }
 
     /**
-     * Procesa los cambios enviados desde el modal de edición (PUT/PATCH).
+     * 3. Listado principal de votantes.
+     */
+    public function index(\Illuminate\Http\Request $request)
+    {
+        $porPagina = $request->input('per_page', 10);
+        if (!in_array($porPagina, [10, 30, 50])) {
+            $porPagina = 10;
+        }
+
+        $user = Auth::user();
+        $query = \Orlando\VoterLoyalty\Models\VoterRecord::query()->with(['leader', 'creator']);
+
+        // 👑 SUPERADMIN / ADMIN / LIDER_ADMIN ven TODO (Agregamos variaciones por si acaso)
+        $rolesPoderosos = ['super_admin', 'admin',];
+
+        if (in_array($user->role, $rolesPoderosos)) {
+            $query->latest();
+        }
+        // 👤 Asesor normal
+        else {
+            $query->where('user_id', $user->id)->latest();
+        }
+
+        $voters = $query->paginate($porPagina);
+        foreach ($voters->getCollection() as $voter) {
+            $voter->acciones = '';
+        }
+
+        $posiblesLideres = User::whereIn('role', ['admin'])->get();
+        $municipios = \App\Models\Municipio::orderBy('nombre', 'asc')->get();
+
+        return view('voter-loyalty::index', compact('voters', 'posiblesLideres', 'porPagina', 'municipios'));
+    }
+
+    /**
+     * 4. Guarda un registro de votante completamente nuevo.
+     */
+    public function store(\Illuminate\Http\Request $request)
+    {
+        $request->validate([
+            'cedula' => 'required|unique:voter_records,cedula',
+            'full_name' => 'required|string|max:255',
+            'phone' => 'required',
+            'fecha_nacimiento' => 'required|date',
+            'status' => 'required|in:active,inactive',
+        ]);
+
+        $voter = new \Orlando\VoterLoyalty\Models\VoterRecord();
+
+        $voter->user_id = Auth::user()->id;
+        $voter->creador_original_nombre = Auth::user()->name;
+        $voter->cedula = $request->input('cedula');
+        $voter->full_name = $request->input('full_name');
+        $voter->phone = $request->input('phone');
+        $voter->voter_email = $request->input('voter_email');
+        $voter->birth_date = $request->input('fecha_nacimiento');
+
+        // Campos Territoriales nuevos
+        $voter->city = $request->input('city');
+        $voter->neighborhood = $request->input('neighborhood');
+        $voter->address = $request->input('address');
+
+        // Campos Laborales nuevos
+        $voter->education_level = $request->input('education_level');
+        $voter->profession = $request->input('profession');
+        $voter->workplace = $request->input('workplace');
+        $voter->hire_date = $request->input('hire_date');
+
+        $voter->leader_id = $request->input('leader_id');
+        $voter->notes = $request->input('notes');
+        $voter->status = $request->input('status');
+
+        $voter->save();
+
+        return redirect()->to('/voters')->with('success', '¡El votante fue registrado con éxito!');
+    }
+
+    /**
+     * 5. Actualiza un registro existente (Edición).
      */
     public function update(\Illuminate\Http\Request $request, int $id)
     {
-        // 1. Buscamos el votante real en la base de datos
+
         $voter = \Orlando\VoterLoyalty\Models\VoterRecord::findOrFail($id);
 
-        // 2. Validamos los datos incluyendo el líder y los nuevos campos
         $request->validate([
-            'cedula'           => 'required|unique:voter_records,cedula,' . $voter->id,
-            'full_name'        => 'required|string|max:255',
-            'phone'            => 'required|string',
-            'voter_email'      => 'nullable|email',
-            'address'          => 'nullable|string',
+            'cedula' => 'required|unique:voter_records,cedula,' . $voter->id,
+            'full_name' => 'required|string|max:255',
+            'phone' => 'required',
             'fecha_nacimiento' => 'required|date',
-            'leader_id'        => 'nullable|integer',
-            'notas'            => 'nullable|string',
+            'status' => 'required|in:active,inactive',
         ]);
 
-        // 3. Asignamos los datos traduciendo al inglés para tu base de datos de MySQL
-        $voter->cedula       = $request->input('cedula');
-        $voter->full_name    = $request->input('full_name');
-        $voter->phone        = $request->input('phone');
-        $voter->address      = $request->input('address');
-        $voter->voter_email  = $request->input('voter_email');
+        $voter->cedula = $request->input('cedula');
+        $voter->full_name = $request->input('full_name');
+        $voter->phone = $request->input('phone');
+        $voter->voter_email = $request->input('voter_email');
+        $voter->birth_date = $request->input('fecha_nacimiento');
 
-        // 🟢 MAPEAMOS AL INGLÉS: Actualizamos apuntando a las columnas reales de tu tabla
-        $voter->birth_date   = $request->input('fecha_nacimiento');
-        $voter->leader_id    = $request->input('leader_id'); // <-- ¡Aquí capturamos el ID del líder seleccionado!
-        $voter->notes        = $request->input('notas');
+        // Actualización Campos Territoriales nuevos
+        $voter->city = $request->input('city');
+        $voter->neighborhood = $request->input('neighborhood');
+        $voter->address = $request->input('address');
 
-        // 4. Guardamos los cambios físicamente en XAMPP
+        // Actualización Campos Laborales nuevos
+        $voter->education_level = $request->input('education_level');
+        $voter->profession = $request->input('profession');
+        $voter->workplace = $request->input('workplace');
+        $voter->hire_date = $request->input('hire_date');
+
+        $voter->leader_id = $request->input('leader_id');
+        $voter->notes = $request->input('notes');
+        $voter->status = $request->input('status');
+
         $voter->save();
 
-        // 5. Redireccionamos limpiamente con mensaje de éxito
         return redirect()->to('/voters')->with('success', '¡Los datos se actualizaron con éxito!');
     }
+
     /**
-     * Cierra la sesión de forma segura.
+     * 6. Cierre de sesión.
      */
     public function logout(\Illuminate\Http\Request $request)
     {
-        \Illuminate\Support\Facades\Auth::logout();
+        Auth::logout();
         $request->session()->invalidate();
         $request->session()->regenerateToken();
 
-        // Redirecciona por URL directa
         return redirect()->to('/login');
     }
 
     /**
-     * 🟢 NUEVO: Elimina un solo votante de la base de datos.
+     * 7. Eliminar un registro individual.
      */
     public function destroy(int $id)
     {
-        // Usamos la ruta completa de Auth para que XAMPP no te bote error
-        if (\Illuminate\Support\Facades\Auth::user()->role !== 'admin') {
+        $rolesPoderosos = ['super_admin', 'admin',];
+
+        if (!in_array(Auth::user()->role, $rolesPoderosos)) {
             return redirect()->to('/voters')->with('error', 'No tienes permisos para realizar esta acción.');
         }
 
@@ -178,15 +192,16 @@ class VoterController extends Controller
     }
 
     /**
-     * 🟢 NUEVO: Elimina múltiples votantes seleccionados por lotes.
+     * 8. Borrado masivo por checkboxes.
      */
     public function bulkDestroy(\Illuminate\Http\Request $request)
     {
-        if (\Illuminate\Support\Facades\Auth::user()->role !== 'admin') {
+        $rolesPoderosos = ['super_admin', 'admin',];
+
+        if (!in_array(Auth::user()->role, $rolesPoderosos)) {
             return redirect()->to('/voters')->with('error', 'No tienes permisos para realizar esta acción.');
         }
 
-        // Recibimos la lista de IDs seleccionados desde los checkboxes
         $ids = $request->input('ids', []);
 
         if (!empty($ids)) {
@@ -194,6 +209,28 @@ class VoterController extends Controller
             return redirect()->to('/voters')->with('success', '¡Los votantes seleccionados fueron eliminados con éxito!');
         }
 
-        return redirect()->to('/voters')->with('error', 'No seleccionaste ningún votante.');
+        return redirect()->to('/voters')->with('error', 'No se seleccionó ningún votante.');
+    }
+
+    /**
+     * 9. Valida en tiempo real (AJAX) si una cédula ya existe en la base de datos.
+     */
+    public function checkCedula(\Illuminate\Http\Request $request)
+    {
+        $cedula = $request->query('cedula');
+
+        // Verificamos si existe en la base de datos
+        $existe = \Orlando\VoterLoyalty\Models\VoterRecord::where('cedula', $cedula)->exists();
+
+        return response()->json(['exists' => $existe]);
+    }
+
+    public function clearNote(int $id)
+    {
+        $voter = \Orlando\VoterLoyalty\Models\VoterRecord::findOrFail($id);
+        $voter->notes = null; // Vaciamos la nota
+        $voter->save();
+
+        return response()->json(['success' => true]);
     }
 }
