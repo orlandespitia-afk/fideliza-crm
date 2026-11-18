@@ -38,7 +38,7 @@
 
             <div class="flex items-center gap-4 bg-blue-700/50 p-3 rounded-xl border border-blue-500/30 w-full md:w-auto md:ml-auto justify-between md:justify-end text-left md:text-right">
 
-                @if(in_array(\Auth::user()->role, ['superadmin', 'super_admin', 'Superadmin']))
+                @if(in_array(\Auth::user()->role, ['super_admin']))
                 <a href="{{ route('users.index') }}" class="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold text-xs px-3 py-2 rounded-lg transition-all duration-200 shadow-md uppercase tracking-wider whitespace-nowrap">
                     ⚙️ Panel de Usuarios
                 </a>
@@ -115,12 +115,20 @@
                         </button>
                     </div>
 
-                    <!-- Botón Eliminar Seleccionados (Tu código original) -->
-                    <button id="btn-bulk-delete" type="button" onclick="ejecutarBorradoMasivo()" style="display: none;" class="bg-red-100 hover:bg-red-200 text-red-700 font-bold py-2 px-4 rounded-xl text-sm transition-all flex items-center gap-2 cursor-pointer border border-red-200 shadow-sm">
-                        🗑️ Eliminar Seleccionados (<span id="bulk-count">0</span>)
+                    <!-- Botón Eliminar Seleccionados (código original) -->
+                    <button id="btn-bulk-delete" type="button" onclick="ejecutarBorradoMasivo()"
+                        class="opacity-0 max-w-0 px-0 ml-0 overflow-hidden pointer-events-none transition-all duration-300 ease-in-out bg-red-100 hover:bg-red-200 text-red-700 font-bold py-2 rounded-xl text-sm flex items-center gap-2 cursor-pointer border border-red-200 shadow-sm whitespace-nowrap">
+                        🗑️ Eliminar (<span id="bulk-count">0</span>)
                     </button>
 
-                    <!-- Botón Nuevo Votante (Tu código original) -->
+                    @if(\Auth::user()->role === 'super_admin')
+                    <button id="btn-bulk-reassign" type="button" onclick="abrirModalReasignacion(event)"
+                        class="opacity-0 max-w-0 px-0 ml-0 overflow-hidden pointer-events-none transition-all duration-300 ease-in-out bg-purple-100 hover:bg-purple-200 text-purple-700 font-bold py-2 rounded-xl text-sm flex items-center gap-2 cursor-pointer border border-purple-200 shadow-sm whitespace-nowrap">
+                        🔄 Reasignar (<span id="bulk-reassign-count">0</span>)
+                    </button>
+                    @endif
+
+                    <!-- Botón Nuevo Votante (código original) -->
                     <button type="button" onclick="
                     openCreateModal(); 
                     document.querySelector('#sidePanelContent h2').innerHTML = '➕ Registrar Nuevo Votante';
@@ -149,7 +157,7 @@
 
                         <th x-show="vistaActual === 'personal'" class="p-3 text-left">Teléfono</th>
                         <th x-show="vistaActual === 'personal'" class="p-3 text-left">Email</th>
-                        <th x-show="vistaActual === 'personal'" class="px-6 py-3 text-left">F. Nacimiento</th>
+                        <th x-show="vistaActual === 'personal'" class="px-6 py-3 text-left">F.Nacimiento</th>
                         <th x-show="vistaActual === 'personal'" class="px-6 py-3 text-left">Edad</th>
 
                         @if(\Auth::user()->role === 'lider_admin')
@@ -766,13 +774,15 @@
 
             const successMessage = "{{ session('success') ?? '' }}";
 
-            const esCreacion = successMessage.toLowerCase().includes('registr') ||
-                successMessage.toLowerCase().includes('crear') ||
-                successMessage.toLowerCase().includes('exito');
+            // Identificamos explícitamente qué es una creación
+            const esCreacion = (successMessage.toLowerCase().includes('registr') ||
+                    successMessage.toLowerCase().includes('crear')) &&
+                !successMessage.toLowerCase().includes('transferi'); // 👈 AGREGAMOS ESTO
 
             const esEliminacion = successMessage.toLowerCase().includes('elimin') ||
                 successMessage.toLowerCase().includes('borrar');
 
+            // Ahora, el modal solo se abrirá si es creación Y NO es una transferencia
             if (successMessage !== '' && esCreacion && !esEliminacion) {
                 document.addEventListener("DOMContentLoaded", function() {
                     openCreateModal();
@@ -840,10 +850,11 @@
 
                 const tooltip = document.createElement('div');
                 tooltip.id = 'voter-notes-tooltip';
-                tooltip.className = 'fixed bg-slate-900 text-slate-100 text-xs rounded-2xl p-4 shadow-2xl z-[9999] w-72 md:w-96 text-left border border-slate-700 animate-fade-in font-normal leading-relaxed';
+                tooltip.className = 'absolute bg-slate-900 text-slate-100 text-xs rounded-xl p-4 shadow-2xl z-50 w-72 md:w-96 text-left border border-slate-700 font-normal leading-relaxed';
 
                 // Aquí agregamos el botón de Borrar (Rojo) y el de Cerrar (Gris)
                 tooltip.innerHTML = `
+        <div style="width: 320px; max-width: 90vw; position: relative;">
         <div class="flex justify-between items-center mb-2 pb-1.5 border-b border-slate-700 font-bold text-slate-300">
             <span class="flex items-center gap-1.5">📝 Notas de ${voter.full_name}</span>
             <div class="flex gap-2">
@@ -851,22 +862,37 @@
                 <button type="button" onclick="cerrarGloboNotas()" class="text-[10px] text-slate-400 hover:text-white font-normal bg-slate-800 hover:bg-slate-700 px-2 py-0.5 rounded-md cursor-pointer transition-colors">✖️ Cerrar</button>
             </div>
         </div>
-        <div class="max-h-32 overflow-y-auto pr-1 text-slate-300 whitespace-pre-line text-sm">
-            ${textoNotas}
-        </div>
-    `;
+        
+        <div style="word-break: break-all; overflow-wrap: break-word; white-space: pre-wrap; max-height: 250px; overflow-y: auto;" class="text-slate-300 text-sm">${textoNotas}</div>
+    </div>
+`;
 
                 boton.classList.add('active-notes');
                 document.body.appendChild(tooltip);
+                // Listener para cerrar al hacer scroll en la tabla
+                const contenedorTabla = document.querySelector('.table-responsive'); // Ajusta este selector según tu HTML
+                if (contenedorTabla) {
+                    contenedorTabla.addEventListener('scroll', cerrarGloboNotas, {
+                        once: true
+                    });
+                }
 
-                // Matemáticas para posicionarlo perfecto
+                // Matemáticas para posicionarlo perfecto (ANCLADO AL DOCUMENTO)
                 const rect = boton.getBoundingClientRect();
-                let topPos = rect.top - (tooltip.offsetHeight / 2) + (rect.height / 2);
-                let leftPos = rect.left - tooltip.offsetWidth - 15;
 
-                if (leftPos < 10) leftPos = rect.right + 15;
-                if (topPos < 10) topPos = 10;
-                if ((topPos + tooltip.offsetHeight) > window.innerHeight) topPos = window.innerHeight - tooltip.offsetHeight - 10;
+                // AGREGAMOS window.scrollY y window.scrollX para que el tooltip sepa 
+                // dónde está el botón REALMENTE, incluso si hiciste scroll.
+                let topPos = rect.top + window.scrollY - (tooltip.offsetHeight / 2) + (rect.height / 2);
+                let leftPos = rect.left + window.scrollX - tooltip.offsetWidth - 15;
+
+                // Ajustes de límites para que no se salga de la pantalla
+                if (leftPos < 10) leftPos = rect.right + window.scrollX + 15;
+                if (topPos < 10) topPos = 10 + window.scrollY; // También ajustamos el tope al scroll
+
+                // Ajuste del límite inferior
+                if ((topPos + tooltip.offsetHeight) > (window.innerHeight + window.scrollY)) {
+                    topPos = window.innerHeight + window.scrollY - tooltip.offsetHeight - 10;
+                }
 
                 tooltip.style.top = `${topPos}px`;
                 tooltip.style.left = `${leftPos}px`;
@@ -1006,17 +1032,105 @@
             }
 
             function actualizarBotonMasivo() {
-                const btnBulk = document.getElementById('btn-bulk-delete');
+                const conteo = filasSeleccionadasIds.length;
+
+                // Controles Eliminar
+                const btnBorrar = document.getElementById('btn-bulk-delete');
                 const countSpan = document.getElementById('bulk-count');
 
-                if (btnBulk && countSpan) {
-                    if (filasSeleccionadasIds.length > 0) {
-                        countSpan.innerText = filasSeleccionadasIds.length;
-                        btnBulk.style.display = 'flex';
-                    } else {
-                        btnBulk.style.display = 'none';
+                // Controles Reasignar
+                const btnReasignar = document.getElementById('btn-bulk-reassign');
+                const reassignCountSpan = document.getElementById('bulk-reassign-count');
+
+                if (conteo > 0) {
+                    if (btnBorrar) {
+                        countSpan.innerText = conteo;
+                        btnBorrar.classList.remove('max-w-0', 'px-0', 'ml-0', 'opacity-0', 'pointer-events-none');
+                        btnBorrar.classList.add('max-w-xs', 'px-4', 'ml-2', 'opacity-100', 'pointer-events-auto');
+                    }
+                    if (btnReasignar) {
+                        reassignCountSpan.innerText = conteo;
+                        btnReasignar.classList.remove('max-w-0', 'px-0', 'ml-0', 'opacity-0', 'pointer-events-none');
+                        btnReasignar.classList.add('max-w-xs', 'px-4', 'ml-2', 'opacity-100', 'pointer-events-auto');
+                    }
+                } else {
+                    if (btnBorrar) {
+                        btnBorrar.classList.remove('max-w-xs', 'px-4', 'ml-2', 'opacity-100', 'pointer-events-auto');
+                        btnBorrar.classList.add('max-w-0', 'px-0', 'ml-0', 'opacity-0', 'pointer-events-none');
+                    }
+                    if (btnReasignar) {
+                        btnReasignar.classList.remove('max-w-xs', 'px-4', 'ml-2', 'opacity-100', 'pointer-events-auto');
+                        btnReasignar.classList.add('max-w-0', 'px-0', 'ml-0', 'opacity-0', 'pointer-events-none');
                     }
                 }
+            }
+
+            function abrirModalReasignacion() {
+                // 1. Creamos un modal desde cero que no pertenece a ningún form existente
+                const modal = document.createElement('div');
+                modal.id = 'modal-dinamico';
+                modal.className = 'fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4';
+
+                modal.innerHTML = `
+    <div class="bg-white rounded-2xl shadow-xl max-w-md w-full">
+        <div class="p-4 border-b border-gray-100 bg-purple-600 rounded-t-2xl text-white">
+            <h3 class="text-lg font-bold">🔄 Transferir Votantes</h3>
+        </div>
+        <div class="p-5">
+            <p class="text-sm text-gray-600 mb-3">Has seleccionado ${filasSeleccionadasIds.length} registros. ¿A qué usuario activo deseas transferirlos?</p>
+            <select id="new_user_select" class="w-full border border-gray-200 px-3.5 py-2 rounded-xl text-sm bg-gray-50 text-gray-700">
+                <option value="" disabled selected>-- Selecciona el nuevo responsable --</option>
+                @foreach(\App\Models\User::all() as $usuario)
+                    <option value="{{ $usuario->id }}">{{ $usuario->name }} ({{ $usuario->role }})</option>
+                @endforeach
+            </select>
+        </div>
+        <div class="p-4 border-t border-gray-100 text-right bg-gray-50 rounded-b-2xl">
+            <button onclick="document.getElementById('modal-dinamico').remove()" class="bg-gray-200 text-gray-800 font-bold py-2 px-4 rounded-xl text-sm mr-2">Cancelar</button>
+            <button id="btn-ejecutar-transferencia" class="bg-purple-600 text-white font-bold py-2 px-4 rounded-xl text-sm">Transferir</button>
+        </div>
+    </div>`;
+
+                document.body.appendChild(modal);
+
+                // 2. Ejecutamos la transferencia mediante un FORMulario "fantasma" que vive solo 1 segundo
+                document.getElementById('btn-ejecutar-transferencia').addEventListener('click', function() {
+                    const userId = document.getElementById('new_user_select').value;
+                    if (!userId) {
+                        alert('Selecciona un usuario');
+                        return;
+                    }
+
+                    const form = document.createElement('form');
+                    form.method = 'POST';
+                    form.action = "{{ route('voters.bulkReassign') }}";
+
+                    // Agregar token CSRF
+                    const csrf = document.createElement('input');
+                    csrf.type = 'hidden';
+                    csrf.name = '_token';
+                    csrf.value = '{{ csrf_token() }}';
+                    form.appendChild(csrf);
+
+                    // Agregar IDs seleccionados
+                    filasSeleccionadasIds.forEach(id => {
+                        const input = document.createElement('input');
+                        input.type = 'hidden';
+                        input.name = 'ids[]';
+                        input.value = id;
+                        form.appendChild(input);
+                    });
+
+                    // Agregar usuario destino
+                    const userInp = document.createElement('input');
+                    userInp.type = 'hidden';
+                    userInp.name = 'new_user_id';
+                    userInp.value = userId;
+                    form.appendChild(userInp);
+
+                    document.body.appendChild(form);
+                    form.submit(); // Enviar formulario independiente
+                });
             }
 
             function sincronizarCheckAll() {

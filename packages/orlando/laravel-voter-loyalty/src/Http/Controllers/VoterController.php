@@ -7,6 +7,7 @@ use Orlando\VoterLoyalty\Models\VoterRecord;
 use Illuminate\Support\Facades\Auth;
 use App\Models\User;
 
+
 class VoterController extends Controller
 {
     /**
@@ -210,6 +211,25 @@ class VoterController extends Controller
         }
 
         return redirect()->to('/voters')->with('error', 'No se seleccionó ningún votante.');
+    }
+
+    public function bulkReassign(\Illuminate\Http\Request $request)
+    {
+        // 🛡️ Seguridad: Usamos $request->user() en lugar de auth()->user()
+        if ($request->user()->role !== 'super_admin') {
+            return redirect()->back()->with('error', 'Acceso denegado. No tienes permisos para reasignar.');
+        }
+
+        $ids = $request->input('ids', []);
+        $new_user_id = $request->input('new_user_id');
+
+        if (!empty($ids) && $new_user_id) {
+            \Orlando\VoterLoyalty\Models\VoterRecord::whereIn('id', $ids)->update(['user_id' => $new_user_id]);
+
+            return redirect()->back()->with('success', '¡Registros transferidos y reasignados con éxito!');
+        }
+
+        return redirect()->back()->with('error', 'No se seleccionaron registros o usuario de destino.');
     }
 
     /**

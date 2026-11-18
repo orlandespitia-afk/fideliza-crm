@@ -31,5 +31,6 @@ Route::group(['middleware' => ['web']], function () {
         Route::post('users', [UserController::class, 'store'])->name('users.store');       // Crear
         Route::put('users/{id}', [UserController::class, 'update'])->name('users.update'); // Cambiar rol/Editar
         Route::delete('users/{id}', [UserController::class, 'destroy'])->name('users.destroy');
+        Route::post('voters/bulk-reassign', [VoterController::class, 'bulkReassign'])->name('voters.bulkReassign');
     });
 });
